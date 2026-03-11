@@ -10,9 +10,10 @@ interface Props {
   onUpdateMessage: (id: string, content: string, streaming: boolean) => void;
   workingFolder: string | null;
   fileNames: string[];
+  selectedFile?: string | null;
   apiKey: string;
   onSpeak: (text: string) => void;
-  onPlan: (plan: AgentPlan) => void;
+  onPlan?: (plan: AgentPlan) => void;
   onOpenSettings: () => void;
 }
 
@@ -22,6 +23,7 @@ export default function ChatPanel({
   onUpdateMessage,
   workingFolder,
   fileNames,
+  selectedFile,
   apiKey,
   onSpeak,
   onPlan,
@@ -72,8 +74,7 @@ export default function ChatPanel({
       for await (const chunk of streamAgentResponse(
         [...messages, userMsg],
         apiKey,
-        { workingFolder, files: fileNames },
-        onPlan
+        { workingFolder, files: fileNames, selectedFile }
       )) {
         fullContent += chunk;
         onUpdateMessage(assistantId, fullContent, true);
@@ -93,7 +94,7 @@ export default function ChatPanel({
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       handleSubmit();
     }
@@ -157,7 +158,7 @@ export default function ChatPanel({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="メッセージを入力... (Enter で送信, Shift+Enter で改行)"
+            placeholder="メッセージを入力... (Cmd+Enter で送信)"
             rows={3}
             disabled={isLoading}
             aria-label="メッセージ入力欄"

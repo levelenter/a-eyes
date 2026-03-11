@@ -16,6 +16,7 @@ export default function Home() {
   const [showSettings, setShowSettings] = useState(false);
   const [currentPlan, setCurrentPlan] = useState<AgentPlan | null>(null);
   const [fileNames, setFileNames] = useState<string[]>([]);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
   // Load settings on mount
@@ -55,21 +56,11 @@ export default function Home() {
   function handleFileSelect(file: FileItem) {
     const content = file.isDirectory
       ? `フォルダ: ${file.name}`
-      : `ファイル: ${file.name}。このファイルを操作するには、チャットで指示してください。`;
+      : `ファイル: ${file.name} を選択しました。チャットで操作を指示してください。`;
     handleSpeak(content);
 
     if (!file.isDirectory) {
-      // Add a context message about the selected file
-      const msg: Message = {
-        id: crypto.randomUUID(),
-        role: "system",
-        content: `[ファイル選択: ${file.path}]`,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [
-        ...prev.filter((m) => !m.content.startsWith("[ファイル選択:")),
-        msg,
-      ]);
+      setSelectedFile(file.path);
     }
   }
 
@@ -202,6 +193,7 @@ export default function Home() {
               onUpdateMessage={handleUpdateMessage}
               workingFolder={settings.workingFolder}
               fileNames={fileNames}
+              selectedFile={selectedFile}
               apiKey={settings.apiKey}
               onSpeak={handleSpeak}
               onPlan={setCurrentPlan}

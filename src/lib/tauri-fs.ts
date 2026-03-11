@@ -7,6 +7,7 @@ import {
   listWebFiles,
   readWebFile,
   deleteWebFile,
+  getWebFile,
   WEB_FOLDER,
 } from "@/lib/web-fs";
 
@@ -95,4 +96,49 @@ export async function openFileInSystem(filePath: string): Promise<void> {
 /** Upload files to the in-memory store (web mode). Returns added filenames. */
 export function uploadFiles(fileList: FileList | File[]): string[] {
   return addFiles(fileList);
+}
+
+/** Read a file as binary (Uint8Array). Works in both Tauri and web mode. */
+export async function readBinaryFile(filePath: string): Promise<Uint8Array> {
+  if (!isTauri || filePath.startsWith(WEB_FOLDER)) {
+    const name = filePath.replace(`${WEB_FOLDER}/`, "");
+    const entry = getWebFile(name);
+    if (!entry) throw new Error(`ファイルが見つかりません: ${name}`);
+    const buffer = await entry.file.arrayBuffer();
+    return new Uint8Array(buffer);
+  }
+  const { readFile } = await import("@tauri-apps/plugin-fs");
+  return readFile(filePath);
+}
+
+/** Write binary data to a file. Works in both Tauri and web mode. */
+export async function writeBinaryFile(filePath: string, data: Uint8Array): Promise<void> {
+  if (!isTauri || filePath.startsWith(WEB_FOLDER)) {
+    const name = filePath.replace(`${WEB_FOLDER}/`, "");
+    const ext = name.split(".").pop()?.toLowerCase() ?? "";
+    const mimeMap: Record<string, string> = {
+      pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      pdf: "application/pdf",
+    };
+    const mime = mimeMap[ext] ?? "application/octet-stream";
+    // new Uint8Array(data) ensures a clean ArrayBuffer-backed copy (avoids SharedArrayBuffer type issues)
+    const file = new File([new Uint8Array(data)], name, { type: mime });
+    addFiles([file]);
+    return;
+  }
+  const { writeFile } = await import("@tauri-apps/plugin-fs");
+  return writeFile(filePath, data);
+}
+
+/** Download a binary file to the user's computer (web mode only). */
+export function downloadBinaryFile(name: string, data: Uint8Array): void {
+  const blob = new Blob([new Uint8Array(data)]);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
 }
