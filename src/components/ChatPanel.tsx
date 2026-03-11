@@ -13,6 +13,7 @@ interface Props {
   apiKey: string;
   onSpeak: (text: string) => void;
   onPlan: (plan: AgentPlan) => void;
+  onOpenSettings: () => void;
 }
 
 export default function ChatPanel({
@@ -24,9 +25,11 @@ export default function ChatPanel({
   apiKey,
   onSpeak,
   onPlan,
+  onOpenSettings,
 }: Props) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [lastError, setLastError] = useState<"auth" | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -40,9 +43,11 @@ export default function ChatPanel({
     if (!trimmed || isLoading) return;
     if (!apiKey) {
       onSpeak("APIキーが設定されていません。設定パネルで入力してください。");
+      onOpenSettings();
       return;
     }
 
+    setLastError(null);
     const userMsg: Message = {
       id: crypto.randomUUID(),
       role: "user",
@@ -54,21 +59,18 @@ export default function ChatPanel({
     setIsLoading(true);
 
     const assistantId = crypto.randomUUID();
-    const assistantMsg: Message = {
+    onAddMessage({
       id: assistantId,
       role: "assistant",
       content: "",
       timestamp: new Date(),
       isStreaming: true,
-    };
-    onAddMessage(assistantMsg);
+    });
 
     try {
       let fullContent = "";
-      const allMessages = [...messages, userMsg];
-
       for await (const chunk of streamAgentResponse(
-        allMessages,
+        [...messages, userMsg],
         apiKey,
         { workingFolder, files: fileNames },
         onPlan
@@ -76,13 +78,14 @@ export default function ChatPanel({
         fullContent += chunk;
         onUpdateMessage(assistantId, fullContent, true);
       }
-
       onUpdateMessage(assistantId, fullContent, false);
       onSpeak(fullContent.replace(/[*#`]/g, "").trim());
     } catch (err) {
+      const isAuth = isAuthError(err);
+      if (isAuth) setLastError("auth");
       const errMsg = friendlyError(err);
-      onUpdateMessage(assistantId, `エラー: ${errMsg}`, false);
-      onSpeak(`エラーが発生しました: ${errMsg}`);
+      onUpdateMessage(assistantId, errMsg, false);
+      onSpeak(errMsg);
     } finally {
       setIsLoading(false);
       inputRef.current?.focus();
@@ -113,10 +116,28 @@ export default function ChatPanel({
           </div>
         )}
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
+          <MessageBubble key={msg.id} message={msg} onOpenSettings={onOpenSettings} />
         ))}
         <div ref={messagesEndRef} aria-hidden="true" />
       </div>
+
+      {/* Auth error banner */}
+      {lastError === "auth" && (
+        <div
+          role="alert"
+          className="mx-4 mb-2 px-4 py-3 bg-red-900/60 border border-red-700 rounded-lg flex items-center justify-between gap-3"
+        >
+          <p className="text-red-300 text-sm">
+            APIキーが無効または期限切れです
+          </p>
+          <button
+            onClick={onOpenSettings}
+            className="shrink-0 px-3 py-1 bg-yellow-500 hover:bg-yellow-400 text-black text-xs font-bold rounded-lg"
+          >
+            設定を開く
+          </button>
+        </div>
+      )}
 
       {/* Input */}
       <form
@@ -125,11 +146,8 @@ export default function ChatPanel({
         aria-label="メッセージ入力フォーム"
       >
         {isLoading && (
-          <div
-            aria-live="polite"
-            className="text-yellow-400 text-sm mb-2 flex items-center gap-2"
-          >
-            <span className="animate-spin">⟳</span>
+          <div aria-live="polite" className="text-yellow-400 text-sm mb-2 flex items-center gap-2">
+            <span className="animate-spin inline-block">⟳</span>
             AIが応答を生成中...
           </div>
         )}
@@ -156,7 +174,10 @@ export default function ChatPanel({
         </div>
         {!apiKey && (
           <p className="text-red-400 text-xs mt-2" role="alert">
-            APIキーが設定されていません。設定パネルで入力してください。
+            APIキーが未設定です。
+            <button onClick={onOpenSettings} className="underline ml-1 hover:text-red-300">
+              設定を開く
+            </button>
           </p>
         )}
       </form>
@@ -164,10 +185,15 @@ export default function ChatPanel({
   );
 }
 
+function isAuthError(err: unknown): boolean {
+  const raw = err instanceof Error ? err.message : String(err);
+  return raw.includes("401") || raw.includes("authentication_error") || raw.includes("invalid x-api-key");
+}
+
 function friendlyError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err);
-  if (raw.includes("401") || raw.includes("authentication_error") || raw.includes("invalid x-api-key")) {
-    return "APIキーが無効です。設定パネルで正しいClaude APIキーを入力してください。";
+  if (isAuthError(err)) {
+    return "APIキーが無効または期限切れです。設定からキーを確認・更新してください。";
   }
   if (raw.includes("429") || raw.includes("rate_limit")) {
     return "APIのレート制限に達しました。しばらく待ってから再試行してください。";
@@ -178,13 +204,20 @@ function friendlyError(err: unknown): string {
   return "エラーが発生しました。しばらく待ってから再試行してください。";
 }
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageBubble({
+  message,
+  onOpenSettings,
+}: {
+  message: Message;
+  onOpenSettings: () => void;
+}) {
   const isUser = message.role === "user";
+  const isAuthErr =
+    !isUser &&
+    (message.content.includes("APIキーが無効") || message.content.includes("authentication_error"));
+
   return (
-    <div
-      className={`flex ${isUser ? "justify-end" : "justify-start"}`}
-      aria-label={`${isUser ? "あなた" : "AI"}: ${message.content}`}
-    >
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
         className={`max-w-[80%] rounded-xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
           isUser
@@ -192,10 +225,16 @@ function MessageBubble({ message }: { message: Message }) {
             : "bg-gray-800 text-gray-100 border border-gray-700"
         } ${message.isStreaming ? "border-l-4 border-l-yellow-400" : ""}`}
       >
-        {!isUser && (
-          <div className="text-xs text-gray-400 mb-1">A-Eyes</div>
-        )}
+        {!isUser && <div className="text-xs text-gray-400 mb-1">A-Eyes</div>}
         {message.content || (message.isStreaming ? "▋" : "")}
+        {isAuthErr && (
+          <button
+            onClick={onOpenSettings}
+            className="mt-2 block px-3 py-1 bg-yellow-500 hover:bg-yellow-400 text-black text-xs font-bold rounded-lg"
+          >
+            設定を開いてキーを更新
+          </button>
+        )}
       </div>
     </div>
   );

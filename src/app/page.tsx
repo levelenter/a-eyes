@@ -140,6 +140,15 @@ export default function Home() {
               ■ 停止
             </button>
           )}
+          {!settings.apiKey && (
+            <button
+              onClick={() => setShowSettings(true)}
+              aria-label="APIキーを設定してください"
+              className="px-3 py-1 bg-red-800 hover:bg-red-700 text-red-200 text-xs rounded-lg animate-pulse"
+            >
+              ⚠ APIキー未設定
+            </button>
+          )}
           <button
             onClick={() => setShowSettings(true)}
             aria-label="設定を開く"
@@ -196,6 +205,7 @@ export default function Home() {
               apiKey={settings.apiKey}
               onSpeak={handleSpeak}
               onPlan={setCurrentPlan}
+              onOpenSettings={() => setShowSettings(true)}
             />
           </div>
         </div>

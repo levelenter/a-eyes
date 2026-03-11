@@ -1,8 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FileItem } from "@/types";
-import { listFiles, openFileInSystem, selectFolder } from "@/lib/tauri-fs";
+import {
+  listFiles,
+  openFileInSystem,
+  selectFolder,
+  uploadFiles,
+  deleteFile,
+  isTauri,
+} from "@/lib/tauri-fs";
+import { subscribeFileChanges, WEB_FOLDER } from "@/lib/web-fs";
 
 interface Props {
   workingFolder: string | null;
@@ -21,11 +29,30 @@ export default function FilePanel({
   const [files, setFiles] = useState<FileItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Web mode: auto-initialize virtual folder on mount
+  useEffect(() => {
+    if (!isTauri && !workingFolder) {
+      onFolderChange(WEB_FOLDER);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load files when folder changes
   useEffect(() => {
     if (workingFolder) {
       loadFiles(workingFolder);
     }
+  }, [workingFolder]);
+
+  // Web mode: subscribe to file store changes (upload / delete)
+  useEffect(() => {
+    if (isTauri) return;
+    const unsubscribe = subscribeFileChanges(() => {
+      if (workingFolder) loadFiles(workingFolder);
+    });
+    return unsubscribe;
   }, [workingFolder]);
 
   async function loadFiles(folder: string) {
@@ -33,9 +60,11 @@ export default function FilePanel({
     try {
       const items = await listFiles(folder);
       setFiles(items);
-      onSpeak(`フォルダを読み込みました。${items.length}件のアイテムがあります。`);
+      if (items.length > 0) {
+        onSpeak(`${items.length}件のファイルがあります。`);
+      }
     } catch {
-      onSpeak("フォルダの読み込みに失敗しました。");
+      onSpeak("ファイル一覧の読み込みに失敗しました。");
     } finally {
       setLoading(false);
     }
@@ -47,6 +76,46 @@ export default function FilePanel({
       onFolderChange(folder);
       onSpeak(`作業フォルダを設定しました: ${folder}`);
     }
+  }
+
+  function handleFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+    const added = uploadFiles(fileList);
+    onSpeak(`${added.length}件のファイルをアップロードしました。`);
+    // Ensure virtual folder is active
+    if (!workingFolder || workingFolder !== WEB_FOLDER) {
+      onFolderChange(WEB_FOLDER);
+    }
+    // Reset input so same file can be re-uploaded
+    e.target.value = "";
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragOver(true);
+  }
+
+  function handleDragLeave() {
+    setIsDragOver(false);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragOver(false);
+    const fileList = e.dataTransfer.files;
+    if (fileList.length === 0) return;
+    const added = uploadFiles(fileList);
+    onSpeak(`${added.length}件のファイルをドロップしました。`);
+    if (!workingFolder || workingFolder !== WEB_FOLDER) {
+      onFolderChange(WEB_FOLDER);
+    }
+  }
+
+  async function handleDeleteFile(file: FileItem, e: React.MouseEvent) {
+    e.stopPropagation();
+    await deleteFile(file.path);
+    onSpeak(`${file.name}を削除しました。`);
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -65,6 +134,9 @@ export default function FilePanel({
     } else if (e.key === "o" && files[selectedIndex]) {
       openFileInSystem(files[selectedIndex].path);
       onSpeak(`${files[selectedIndex].name}を開きます`);
+    } else if (e.key === "Delete" && files[selectedIndex] && !isTauri) {
+      deleteFile(files[selectedIndex].path);
+      onSpeak(`${files[selectedIndex].name}を削除しました。`);
     }
   }
 
@@ -73,23 +145,64 @@ export default function FilePanel({
       className="w-64 bg-gray-900 border-r-2 border-gray-700 flex flex-col"
       aria-label="ファイルパネル"
     >
-      <div className="p-3 border-b border-gray-700">
-        <button
-          onClick={handleSelectFolder}
-          className="w-full py-2 px-3 bg-yellow-500 hover:bg-yellow-400 text-black font-semibold rounded-lg text-sm transition-colors"
-          aria-label="作業フォルダを選択"
-        >
-          フォルダを選択
-        </button>
-        {workingFolder && (
-          <p className="text-xs text-gray-400 mt-2 truncate" title={workingFolder}>
-            {workingFolder.split("/").pop()}
-          </p>
+      {/* Header: folder selector (Tauri) or upload button (web) */}
+      <div className="p-3 border-b border-gray-700 space-y-2">
+        {isTauri ? (
+          <>
+            <button
+              onClick={handleSelectFolder}
+              className="w-full py-2 px-3 bg-yellow-500 hover:bg-yellow-400 text-black font-semibold rounded-lg text-sm transition-colors"
+              aria-label="作業フォルダを選択"
+            >
+              フォルダを選択
+            </button>
+            {workingFolder && (
+              <p className="text-xs text-gray-400 truncate" title={workingFolder}>
+                {workingFolder.split("/").pop()}
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="sr-only"
+              aria-label="ファイルを選択してアップロード"
+              onChange={handleFileInputChange}
+            />
+            {/* Upload button */}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full py-2 px-3 bg-yellow-500 hover:bg-yellow-400 text-black font-semibold rounded-lg text-sm transition-colors"
+              aria-label="ファイルをアップロード"
+            >
+              ＋ ファイルを追加
+            </button>
+            {/* Drag & drop zone */}
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={`border-2 border-dashed rounded-lg px-2 py-3 text-center text-xs transition-colors cursor-pointer ${
+                isDragOver
+                  ? "border-yellow-400 bg-yellow-400/10 text-yellow-300"
+                  : "border-gray-600 text-gray-500 hover:border-gray-500 hover:text-gray-400"
+              }`}
+              aria-label="ファイルをここにドロップ"
+              role="region"
+            >
+              {isDragOver ? "ここで離す" : "ここにドロップ"}
+            </div>
+          </>
         )}
       </div>
 
+      {/* File list */}
       <div className="flex-1 overflow-y-auto">
-        {!workingFolder && (
+        {!workingFolder && isTauri && (
           <p className="text-gray-500 text-sm p-4 text-center">
             作業フォルダを選択してください
           </p>
@@ -97,6 +210,11 @@ export default function FilePanel({
         {loading && (
           <p className="text-gray-400 text-sm p-4 text-center" aria-live="polite">
             読み込み中...
+          </p>
+        )}
+        {!loading && files.length === 0 && workingFolder && (
+          <p className="text-gray-500 text-sm p-4 text-center">
+            {isTauri ? "ファイルがありません" : "ファイルを追加してください"}
           </p>
         )}
         {!loading && files.length > 0 && (
@@ -116,25 +234,43 @@ export default function FilePanel({
                   setSelectedIndex(idx);
                   onFileSelect(file);
                 }}
-                className={`px-3 py-2 cursor-pointer text-sm transition-colors ${
+                className={`flex items-center gap-1 px-3 py-2 cursor-pointer text-sm transition-colors group ${
                   idx === selectedIndex
                     ? "bg-yellow-500 text-black"
                     : "text-gray-300 hover:bg-gray-800"
                 }`}
               >
-                <span className="mr-2" aria-hidden="true">
+                <span className="mr-1 flex-shrink-0" aria-hidden="true">
                   {file.isDirectory ? "📁" : getFileIcon(file.name)}
                 </span>
-                {file.name}
+                <span className="flex-1 truncate" title={file.name}>
+                  {file.name}
+                </span>
+                {/* Delete button — web mode only */}
+                {!isTauri && !file.isDirectory && (
+                  <button
+                    onClick={(e) => handleDeleteFile(file, e)}
+                    aria-label={`${file.name}を削除`}
+                    title="削除"
+                    className={`flex-shrink-0 opacity-0 group-hover:opacity-100 focus:opacity-100 text-xs px-1 py-0.5 rounded transition-opacity ${
+                      idx === selectedIndex
+                        ? "text-black hover:bg-yellow-600"
+                        : "text-gray-400 hover:text-red-400 hover:bg-gray-700"
+                    }`}
+                  >
+                    ✕
+                  </button>
+                )}
               </li>
             ))}
           </ul>
         )}
       </div>
 
+      {/* Footer hint */}
       <div className="p-2 border-t border-gray-700">
         <p className="text-xs text-gray-500 text-center">
-          ↑↓で選択, Enterで操作
+          {isTauri ? "↑↓で選択, Enterで操作" : "↑↓で選択, Enterで選択, Delで削除"}
         </p>
       </div>
     </aside>

@@ -4,3 +4,4 @@ package-lock.json
 out
 .next
 src-tauri/target
+.env
