@@ -1,12 +1,15 @@
 /**
- * Agent SDK API route.
+ * Agent API route.
  * Available only in Next.js server mode (next dev / SSR).
  * NOT available in static export mode (Tauri production build).
  *
- * Streams responses from the @anthropic-ai/claude-agent-sdk via SSE.
+ * Uses @anthropic-ai/sdk directly (server-side) with SSE streaming.
  */
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import Anthropic from "@anthropic-ai/sdk";
 import type { NextRequest } from "next/server";
+import { FILE_TOOLS, executeTool } from "@/lib/agent-tools";
+
+const MODEL = "claude-sonnet-4-6";
 
 interface AgentRequest {
   prompt: string;
@@ -17,7 +20,7 @@ interface AgentRequest {
 
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as AgentRequest;
-  const { prompt, apiKey, cwd, systemPrompt } = body;
+  const { prompt, apiKey, systemPrompt, cwd } = body;
 
   if (!prompt || !apiKey) {
     return new Response(JSON.stringify({ error: "prompt and apiKey are required" }), {
@@ -28,58 +31,89 @@ export async function POST(req: NextRequest) {
 
   const encoder = new TextEncoder();
 
-  const stream = new ReadableStream({
+  const responseStream = new ReadableStream({
     async start(controller) {
       const send = (data: Record<string, unknown>) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       };
 
       try {
-        const agentQuery = query({
-          prompt,
-          options: {
-            cwd: cwd ?? process.cwd(),
-            ...(systemPrompt ? { systemPrompt } : {}),
-            // Allow file read/write/edit and shell for complex ops (e.g. PPTX via script)
-            allowedTools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
-            env: (() => {
-              // CLAUDECODE env var causes "nested session" rejection — strip it
-              const { CLAUDECODE: _cc, ...rest } = process.env;
-              return { ...rest, ANTHROPIC_API_KEY: apiKey };
-            })(),
-            persistSession: false,
-            maxTurns: 15,
-          },
-        });
+        const client = new Anthropic({ apiKey });
 
-        for await (const msg of agentQuery) {
-          console.log("[/api/agent] msg:", msg.type, JSON.stringify(msg).slice(0, 300));
-          if (msg.type === "assistant") {
-            for (const block of msg.message.content) {
-              if (block.type === "text" && block.text.trim()) {
-                send({ type: "text", text: block.text });
-              } else if (block.type === "tool_use") {
-                send({ type: "tool_use", name: block.name });
-              }
+        const messages: Anthropic.MessageParam[] = [
+          { role: "user", content: prompt },
+        ];
+
+        let iteration = 0;
+        while (iteration < 10) {
+          iteration++;
+
+          // Stream the response for real-time text delivery
+          const stream = client.messages.stream({
+            model: MODEL,
+            max_tokens: 4096,
+            system: systemPrompt ?? "",
+            messages,
+            tools: FILE_TOOLS,
+          });
+
+          // Forward text chunks as they arrive
+          for await (const event of stream) {
+            if (
+              event.type === "content_block_delta" &&
+              event.delta.type === "text_delta" &&
+              event.delta.text
+            ) {
+              send({ type: "text", text: event.delta.text });
+            } else if (
+              event.type === "content_block_start" &&
+              event.content_block.type === "tool_use"
+            ) {
+              send({ type: "tool_use", name: event.content_block.name });
             }
-          } else if (msg.type === "result") {
-            if (msg.is_error) {
-              const errText =
-                "errors" in msg
-                  ? (msg.errors as string[]).join("; ")
-                  : "result" in msg
-                  ? String((msg as { result: string }).result)
-                  : "Unknown error";
-              send({ type: "error", error: errText });
-            }
-            break;
           }
+
+          const response = await stream.finalMessage();
+
+          if (response.stop_reason !== "tool_use") break;
+
+          // Execute tool calls
+          const toolUseBlocks = response.content.filter(
+            (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+          );
+          if (toolUseBlocks.length === 0) break;
+
+          const toolResults: Anthropic.ToolResultBlockParam[] = [];
+          for (const toolUse of toolUseBlocks) {
+            try {
+              const result = await executeTool(
+                toolUse.name,
+                toolUse.input as Record<string, unknown>,
+                { workingFolder: cwd ?? null, selectedFile: null }
+              );
+              toolResults.push({
+                type: "tool_result",
+                tool_use_id: toolUse.id,
+                content: result,
+              });
+            } catch (err) {
+              toolResults.push({
+                type: "tool_result",
+                tool_use_id: toolUse.id,
+                content: `エラー: ${err instanceof Error ? err.message : String(err)}`,
+                is_error: true,
+              });
+            }
+          }
+
+          messages.push({ role: "assistant", content: response.content });
+          messages.push({ role: "user", content: toolResults });
         }
 
         send({ type: "done" });
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : String(e);
-        console.error("[/api/agent] error:", e);
+        console.error("[/api/agent] error:", errMsg);
         send({ type: "error", error: errMsg });
       } finally {
         controller.close();
@@ -87,7 +121,7 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  return new Response(stream, {
+  return new Response(responseStream, {
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
