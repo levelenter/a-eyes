@@ -1,9 +1,0 @@
-node_modules
-.claude
-package-lock.json
-out
-.next
-src-tauri/target
-.env
-dist
-web-uploads
