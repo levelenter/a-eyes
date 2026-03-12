@@ -1,0 +1,222 @@
+name: Build Electron App
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Target platform"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - mac
+          - windows
+          - linux
+
+jobs:
+  build-mac:
+    if: >
+      github.event_name == 'push' ||
+      inputs.platform == 'all' ||
+      inputs.platform == 'mac'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js (standalone)
+        run: ELECTRON_BUILD=1 npx next build
+
+      - name: Copy static assets
+        run: |
+          cp -r .next/static .next/standalone/.next/
+          [ -d public ] && cp -r public .next/standalone/ || true
+
+      - name: Create icon assets
+        run: |
+          mkdir -p build/icon.iconset
+          # Generate placeholder PNG if no icon exists
+          if [ ! -f build/icon.png ]; then
+            python3 -c "
+          import struct, zlib
+          def chunk(t, d):
+              c = t + d
+              return struct.pack('>I', len(d)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+          sig = b'\x89PNG\r\n\x1a\n'
+          ihdr = chunk(b'IHDR', struct.pack('>IIBBBBB', 512, 512, 8, 2, 0, 0, 0))
+          raw = b'\x00' + b'\x00\x50\x80' * 512
+          raw = raw * 512
+          idat = chunk(b'IDAT', zlib.compress(raw))
+          iend = chunk(b'IEND', b'')
+          open('build/icon.png', 'wb').write(sig + ihdr + idat + iend)
+          "
+          fi
+          for size in 16 32 128 256 512; do
+            sips -z $size $size build/icon.png --out build/icon.iconset/icon_${size}x${size}.png
+          done
+          sips -z 32 32 build/icon.png --out build/icon.iconset/icon_16x16@2x.png
+          sips -z 64 64 build/icon.png --out build/icon.iconset/icon_32x32@2x.png
+          sips -z 256 256 build/icon.png --out build/icon.iconset/icon_128x128@2x.png
+          sips -z 512 512 build/icon.png --out build/icon.iconset/icon_256x256@2x.png
+          iconutil -c icns build/icon.iconset -o build/icon.icns
+
+      - name: Package with electron-builder (macOS)
+        run: npx electron-builder --mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload DMG artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-dmg
+          path: dist/*.dmg
+          retention-days: 14
+
+  build-windows:
+    if: >
+      github.event_name == 'push' ||
+      inputs.platform == 'all' ||
+      inputs.platform == 'windows'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js (standalone)
+        run: npx next build
+        env:
+          ELECTRON_BUILD: "1"
+
+      - name: Copy static assets
+        shell: bash
+        run: |
+          cp -r .next/static .next/standalone/.next/
+          [ -d public ] && cp -r public .next/standalone/ || true
+
+      - name: Create placeholder icon (Windows ICO)
+        shell: bash
+        run: |
+          mkdir -p build
+          if [ ! -f build/icon.ico ]; then
+            python3 - <<'PYEOF'
+          import struct, zlib
+          def make_png(size):
+              def chunk(t, d):
+                  c = t + d
+                  return struct.pack('>I', len(d)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+              raw = (b'\x00' + b'\x00\x50\x80' * size) * size
+              return (b'\x89PNG\r\n\x1a\n'
+                  + chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0))
+                  + chunk(b'IDAT', zlib.compress(raw))
+                  + chunk(b'IEND', b''))
+          png256 = make_png(256)
+          ico_header = struct.pack('<HHH', 0, 1, 1)
+          entry = struct.pack('<BBBBHHII', 0, 0, 0, 0, 1, 32, len(png256), 22)
+          with open('build/icon.ico', 'wb') as f:
+              f.write(ico_header + entry + png256)
+          print('Created build/icon.ico')
+          PYEOF
+          fi
+
+      - name: Package with electron-builder (Windows)
+        run: npx electron-builder --win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-nsis
+          path: dist/*.exe
+          retention-days: 14
+
+  build-linux:
+    if: >
+      github.event_name == 'push' ||
+      inputs.platform == 'all' ||
+      inputs.platform == 'linux'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Next.js (standalone)
+        run: ELECTRON_BUILD=1 npx next build
+
+      - name: Copy static assets
+        run: |
+          cp -r .next/static .next/standalone/.next/
+          [ -d public ] && cp -r public .next/standalone/ || true
+
+      - name: Create placeholder icon
+        run: |
+          mkdir -p build
+          if [ ! -f build/icon.png ]; then
+            python3 -c "
+          import struct, zlib
+          def chunk(t, d):
+              c = t + d
+              return struct.pack('>I', len(d)) + c + struct.pack('>I', zlib.crc32(c) & 0xffffffff)
+          sig = b'\x89PNG\r\n\x1a\n'
+          ihdr = chunk(b'IHDR', struct.pack('>IIBBBBB', 512, 512, 8, 2, 0, 0, 0))
+          raw = (b'\x00' + b'\x00\x50\x80' * 512) * 512
+          idat = chunk(b'IDAT', zlib.compress(raw))
+          iend = chunk(b'IEND', b'')
+          open('build/icon.png', 'wb').write(sig + ihdr + idat + iend)
+          "
+          fi
+
+      - name: Package with electron-builder (Linux)
+        run: npx electron-builder --linux
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload AppImage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: dist/*.AppImage
+          retention-days: 14
+
+  release:
+    needs: [build-mac, build-windows, build-linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
