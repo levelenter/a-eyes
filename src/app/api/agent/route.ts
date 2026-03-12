@@ -1,3 +1,6 @@
+// Dynamic route: not included in static export (Tauri build)
+export const dynamic = "force-dynamic";
+
 /**
  * Agent API route.
  * Available only in Next.js server mode (next dev / SSR).
@@ -7,7 +10,8 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import type { NextRequest } from "next/server";
-import { FILE_TOOLS, executeTool } from "@/lib/agent-tools";
+import { FILE_TOOLS } from "@/lib/agent-tools";
+import { executeToolServer, WEB_WORKING_FOLDER } from "@/lib/server-tools";
 
 const MODEL = "claude-sonnet-4-6";
 
@@ -79,17 +83,17 @@ export async function POST(req: NextRequest) {
 
           // Execute tool calls
           const toolUseBlocks = response.content.filter(
-            (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+            (b: Anthropic.ContentBlock): b is Anthropic.ToolUseBlock => b.type === "tool_use"
           );
           if (toolUseBlocks.length === 0) break;
 
           const toolResults: Anthropic.ToolResultBlockParam[] = [];
           for (const toolUse of toolUseBlocks) {
             try {
-              const result = await executeTool(
+              const result = await executeToolServer(
                 toolUse.name,
                 toolUse.input as Record<string, unknown>,
-                { workingFolder: cwd ?? null, selectedFile: null }
+                cwd ?? WEB_WORKING_FOLDER
               );
               toolResults.push({
                 type: "tool_result",

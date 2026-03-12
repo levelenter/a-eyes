@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { AccessibilityMode, AgentPlan, AppSettings, FileItem, Message } from "@/types";
 import { loadSettings, saveSettings } from "@/lib/settings";
 import { speak, stop as ttsStop } from "@/lib/tts";
+import { isTauri } from "@/lib/tauri-fs";
 import ModeSelectionDialog from "@/components/ModeSelectionDialog";
 import FilePanel from "@/components/FilePanel";
 import ChatPanel from "@/components/ChatPanel";
@@ -19,10 +20,23 @@ export default function Home() {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
-  // Load settings on mount
+  // Load settings on mount.
+  // Always clear stale workingFolder from localStorage and fetch the
+  // authoritative server path from /api/config.
   useEffect(() => {
     const s = loadSettings();
-    setSettings(s);
+    setSettings({ ...s, workingFolder: null }); // clear any stale Tauri/old path
+
+    fetch("/api/config")
+      .then((r) => r.json())
+      .then(({ webWorkingFolder }: { webWorkingFolder: string | null }) => {
+        if (webWorkingFolder) {
+          setSettings((prev) =>
+            prev ? { ...prev, workingFolder: webWorkingFolder } : prev
+          );
+        }
+      })
+      .catch(() => {/* /api/config 取得失敗時は workingFolder=null のまま */});
   }, []);
 
   const isTTSMode = settings?.accessibilityMode === "built-in-tts";
@@ -162,15 +176,8 @@ export default function Home() {
       <main className="flex flex-1 overflow-hidden" role="main">
         <FilePanel
           workingFolder={settings.workingFolder}
-          onFolderChange={(folder) => {
-            handleFolderChange(folder);
-            // Update file names list when folder changes
-            import("@/lib/tauri-fs").then(({ listFiles }) => {
-              listFiles(folder).then((files) => {
-                setFileNames(files.map((f) => f.name));
-              });
-            });
-          }}
+          onFolderChange={handleFolderChange}
+          onFilesChange={(names) => setFileNames(names)}
           onFileSelect={handleFileSelect}
           ttsEnabled={isTTSMode}
           onSpeak={handleSpeak}

@@ -5,3 +5,5 @@ out
 .next
 src-tauri/target
 .env
+dist
+web-uploads

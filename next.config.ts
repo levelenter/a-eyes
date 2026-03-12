@@ -1,19 +1,18 @@
 import type { NextConfig } from "next";
-
-const isProd = process.env.NODE_ENV === "production";
-const isTauriBuild = process.env.TAURI_BUILD === "1";
-const internalHost = process.env.TAURI_DEV_HOST || "localhost";
-const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 1420;
+import path from "path";
 
 const nextConfig: NextConfig = {
-  // Static export only for Tauri production builds.
-  // In dev mode (next dev) and web mode, API routes remain available.
-  ...(isTauriBuild ? { output: "export" } : {}),
+  // standalone output for Electron production builds
+  ...(process.env.ELECTRON_BUILD === "1"
+    ? {
+        output: "standalone",
+        // Ensure standalone output is at .next/standalone/ (not nested in full path)
+        outputFileTracingRoot: path.join(__dirname),
+      }
+    : {}),
   images: {
     unoptimized: true,
   },
-  trailingSlash: true,
-  ...(isProd ? {} : { assetPrefix: `http://${internalHost}:${port}` }),
 };
 
 export default nextConfig;

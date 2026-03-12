@@ -10,11 +10,11 @@ import {
   deleteFile,
   isTauri,
 } from "@/lib/tauri-fs";
-import { subscribeFileChanges, WEB_FOLDER } from "@/lib/web-fs";
 
 interface Props {
   workingFolder: string | null;
   onFolderChange: (folder: string) => void;
+  onFilesChange?: (fileNames: string[]) => void;
   onFileSelect: (file: FileItem) => void;
   ttsEnabled: boolean;
   onSpeak: (text: string) => void;
@@ -23,6 +23,7 @@ interface Props {
 export default function FilePanel({
   workingFolder,
   onFolderChange,
+  onFilesChange,
   onFileSelect,
   onSpeak,
 }: Props) {
@@ -32,13 +33,6 @@ export default function FilePanel({
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Web mode: auto-initialize virtual folder on mount
-  useEffect(() => {
-    if (!isTauri && !workingFolder) {
-      onFolderChange(WEB_FOLDER);
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   // Load files when folder changes
   useEffect(() => {
     if (workingFolder) {
@@ -46,20 +40,12 @@ export default function FilePanel({
     }
   }, [workingFolder]);
 
-  // Web mode: subscribe to file store changes (upload / delete)
-  useEffect(() => {
-    if (isTauri) return;
-    const unsubscribe = subscribeFileChanges(() => {
-      if (workingFolder) loadFiles(workingFolder);
-    });
-    return unsubscribe;
-  }, [workingFolder]);
-
   async function loadFiles(folder: string) {
     setLoading(true);
     try {
       const items = await listFiles(folder);
       setFiles(items);
+      onFilesChange?.(items.filter((f) => !f.isDirectory).map((f) => f.name));
       if (items.length > 0) {
         onSpeak(`${items.length}件のファイルがあります。`);
       }
@@ -78,16 +64,17 @@ export default function FilePanel({
     }
   }
 
-  function handleFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileInputChange(e: React.ChangeEvent<HTMLInputElement>) {
     const fileList = e.target.files;
     if (!fileList || fileList.length === 0) return;
-    const added = uploadFiles(fileList);
-    onSpeak(`${added.length}件のファイルをアップロードしました。`);
-    // Ensure virtual folder is active
-    if (!workingFolder || workingFolder !== WEB_FOLDER) {
-      onFolderChange(WEB_FOLDER);
+    try {
+      const saved = await uploadFiles(fileList);
+      onSpeak(`${saved.length}件のファイルをアップロードしました。`);
+      // アップロード後にファイル一覧を更新
+      if (workingFolder) loadFiles(workingFolder);
+    } catch {
+      onSpeak("アップロードに失敗しました。");
     }
-    // Reset input so same file can be re-uploaded
     e.target.value = "";
   }
 
@@ -100,15 +87,17 @@ export default function FilePanel({
     setIsDragOver(false);
   }
 
-  function handleDrop(e: React.DragEvent) {
+  async function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     setIsDragOver(false);
     const fileList = e.dataTransfer.files;
     if (fileList.length === 0) return;
-    const added = uploadFiles(fileList);
-    onSpeak(`${added.length}件のファイルをドロップしました。`);
-    if (!workingFolder || workingFolder !== WEB_FOLDER) {
-      onFolderChange(WEB_FOLDER);
+    try {
+      const saved = await uploadFiles(fileList);
+      onSpeak(`${saved.length}件のファイルをドロップしました。`);
+      if (workingFolder) loadFiles(workingFolder);
+    } catch {
+      onSpeak("アップロードに失敗しました。");
     }
   }
 
@@ -162,7 +151,7 @@ export default function FilePanel({
               </p>
             )}
           </>
-        ) : (
+        ) : ( /* Web モード: サーバーフォルダへのアップロード */
           <>
             {/* Hidden file input */}
             <input
@@ -207,6 +196,11 @@ export default function FilePanel({
             作業フォルダを選択してください
           </p>
         )}
+        {!workingFolder && !isTauri && (
+          <p className="text-gray-500 text-sm p-4 text-center">
+            サーバー作業フォルダを取得中...
+          </p>
+        )}
         {loading && (
           <p className="text-gray-400 text-sm p-4 text-center" aria-live="polite">
             読み込み中...
@@ -214,7 +208,9 @@ export default function FilePanel({
         )}
         {!loading && files.length === 0 && workingFolder && (
           <p className="text-gray-500 text-sm p-4 text-center">
-            {isTauri ? "ファイルがありません" : "ファイルを追加してください"}
+            {isTauri
+              ? "ファイルがありません"
+              : "ファイルをアップロードしてください"}
           </p>
         )}
         {!loading && files.length > 0 && (
