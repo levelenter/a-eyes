@@ -38,7 +38,11 @@ function waitForServer(port, timeoutMs = 30000) {
 }
 
 async function startNextServer() {
-  if (isDev) return; // Next.js dev server is started separately
+  if (isDev) {
+    // 開発時は Next の dev サーバーを npm script から起動する前提
+    await waitForServer(PORT, 30000);
+    return;
+  }
 
   const serverPath = path.join(
     process.resourcesPath,
@@ -76,16 +80,6 @@ async function startNextServer() {
 }
 
 async function createWindow() {
-  try {
-    await startNextServer();
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[A-Eyes] Failed to start server:", msg);
-    dialog.showErrorBox("起動エラー", `サーバーの起動に失敗しました:\n${msg}`);
-    app.quit();
-    return;
-  }
-
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -100,7 +94,25 @@ async function createWindow() {
     },
   });
 
-  await mainWindow.loadURL(`http://localhost:${PORT}`);
+  // まずは軽量なローディング画面を表示
+  const loadingPath = path.join(__dirname, "loading.html");
+  if (fs.existsSync(loadingPath)) {
+    await mainWindow.loadFile(loadingPath);
+  }
+
+  // バックグラウンドで Next.js サーバーを起動し、準備ができたら本体を読み込む
+  try {
+    await startNextServer();
+    if (!mainWindow.isDestroyed()) {
+      await mainWindow.loadURL(`http://localhost:${PORT}`);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[A-Eyes] Failed to start server:", msg);
+    dialog.showErrorBox("起動エラー", `サーバーの起動に失敗しました:\n${msg}`);
+    app.quit();
+    return;
+  }
 
   // Open external links in system browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {

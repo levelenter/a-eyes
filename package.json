@@ -38,6 +38,8 @@
   "build": {
     "appId": "com.levelenter.a-eyes",
     "productName": "A-Eyes",
+    "compression": "maximum",
+    "asar": true,
     "copyright": "Copyright © 2025 Levelenter",
     "files": [
       "electron/**/*"
@@ -45,7 +47,12 @@
     "extraResources": [
       {
         "from": ".next/standalone",
-        "to": "next-server"
+        "to": "next-server",
+        "filter": [
+          "**/*",
+          "!**/*.map",
+          "!**/*.log"
+        ]
       }
     ],
     "mac": {

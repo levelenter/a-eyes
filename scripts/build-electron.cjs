@@ -3,9 +3,11 @@ const fs = require("fs");
 const path = require("path");
 
 function run(command, args, options = {}) {
+  const isWin = process.platform === "win32";
   const result = spawnSync(command, args, {
     stdio: "inherit",
-    shell: false,
+    // Windows では .cmd 実行に shell 経由が必要なため
+    shell: isWin,
     ...options,
   });
 
@@ -25,14 +27,37 @@ function safeCp(src, dest) {
 
 function safeRm(targetPath) {
   if (!fs.existsSync(targetPath)) return;
-  fs.rmSync(targetPath, { recursive: true, force: true });
+  try {
+    fs.rmSync(targetPath, { recursive: true, force: true });
+  } catch (err) {
+    // Windows で稀に EPERM などで削除できないことがあるが、
+    // ここはあくまでビルド前のクリーンアップなので、
+    // ログだけ出してビルド自体は続行する。
+    console.warn(`Warning: failed to remove ${targetPath}:`, err?.message ?? err);
+  }
 }
 
 function main() {
-  const npx = process.platform === "win32" ? "npx.cmd" : "npx";
+  const isWin = process.platform === "win32";
+
+  // 前回ビルドで生成された .next/standalone を削除しておかないと
+  // 新しい standalone 内に古い standalone がそのまま取り込まれ、
+  // ビルドするたびにサイズが倍々に増えてしまう。
+  const standaloneDir = path.join(".next", "standalone");
+  safeRm(standaloneDir);
+  const nextBin = path.join(
+    "node_modules",
+    ".bin",
+    isWin ? "next.cmd" : "next"
+  );
+  const electronBuilderBin = path.join(
+    "node_modules",
+    ".bin",
+    isWin ? "electron-builder.cmd" : "electron-builder"
+  );
 
   console.log("→ Building Next.js (standalone mode)...");
-  run(npx, ["next", "build"], {
+  run(nextBin, ["build"], {
     env: {
       ...process.env,
       ELECTRON_BUILD: "1",
@@ -48,6 +73,18 @@ function main() {
   const publicDest = path.join(".next", "standalone", "public");
   safeCp(publicSrc, publicDest);
 
+  // .next/standalone 内の node_modules から devDependencies を削除してサイズ削減
+  // （package-lock.json に基づき npm が dev フラグ付き依存を落としてくれる想定）
+  const lockPath = path.join(standaloneDir, "package-lock.json");
+  if (fs.existsSync(lockPath)) {
+    console.log("→ Pruning devDependencies from standalone node_modules...");
+    run("npm", ["prune", "--production"], { cwd: standaloneDir });
+  } else {
+    console.log(
+      "→ Skip npm prune: package-lock.json not found in .next/standalone"
+    );
+  }
+
   console.log("→ Removing previous unpacked app bundles (to prevent disk bloat)...");
   safeRm(path.join("dist", "mac"));
   safeRm(path.join("dist", "mac-arm64"));
@@ -56,7 +93,7 @@ function main() {
 
   console.log("→ Packaging with electron-builder...");
   const extraArgs = process.argv.slice(2);
-  run(npx, ["electron-builder", ...extraArgs]);
+  run(electronBuilderBin, extraArgs);
 
   console.log("✓ Electron build complete.");
 }
