@@ -1,0 +1,34 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "A-Eyes",
+  "version": "0.1.0",
+  "identifier": "com.levelenter.a-eyes",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "A-Eyes",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "category": "Productivity",
+    "shortDescription": "視覚障害者向けAIアシスタント",
+    "longDescription": "A-Eyes - 視覚障害者向けのAIファイル操作・編集アシスタントです。"
+  }
+}

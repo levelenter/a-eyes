@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { AccessibilityMode, AgentPlan, AppSettings, FileItem, Message } from "@/types";
 import { loadSettings, saveSettings } from "@/lib/settings";
 import { speak, stop as ttsStop } from "@/lib/tts";
-import { isTauri } from "@/lib/tauri-fs";
+import { isTauri, getWorkingFolder } from "@/lib/tauri-fs";
 import ModeSelectionDialog from "@/components/ModeSelectionDialog";
 import FilePanel from "@/components/FilePanel";
 import ChatPanel from "@/components/ChatPanel";
@@ -21,23 +21,27 @@ export default function Home() {
   const [isSpeaking, setIsSpeaking] = useState(false);
 
   // Load settings on mount.
-  // Always clear stale workingFolder from localStorage and fetch the
-  // authoritative server path from /api/config.
   useEffect(() => {
     const s = loadSettings();
-    setSettings({ ...s, workingFolder: null }); // clear any stale Tauri/old path
-    saveSettings({ workingFolder: null }); // also purge from localStorage
-
+    if (isTauri) {
+      setSettings({ ...s, workingFolder: null });
+      getWorkingFolder().then((folder) => {
+        if (folder) {
+          setSettings((prev) => (prev ? { ...prev, workingFolder: folder } : prev));
+        }
+      });
+      return;
+    }
+    setSettings({ ...s, workingFolder: null });
+    saveSettings({ workingFolder: null });
     fetch("/api/config")
       .then((r) => r.json())
       .then(({ webWorkingFolder }: { webWorkingFolder: string | null }) => {
         if (webWorkingFolder) {
-          setSettings((prev) =>
-            prev ? { ...prev, workingFolder: webWorkingFolder } : prev
-          );
+          setSettings((prev) => (prev ? { ...prev, workingFolder: webWorkingFolder } : prev));
         }
       })
-      .catch(() => {/* /api/config 取得失敗時は workingFolder=null のまま */});
+      .catch(() => {});
   }, []);
 
   const isTTSMode = settings?.accessibilityMode === "built-in-tts";

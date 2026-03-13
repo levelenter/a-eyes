@@ -2,22 +2,22 @@
   "name": "a-eyes",
   "version": "0.1.0",
   "private": true,
-  "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
     "dev:server": "node server/index.cjs",
-    "electron:dev": "NODE_ENV=development electron .",
-    "dev:all": "concurrently \"npm run dev\" \"npm run dev:server\" \"wait-on tcp:1420 && npm run electron:dev\"",
-    "build": "vite build",
-    "build:electron": "node scripts/build-electron.cjs",
+    "dev:web": "concurrently \"npm run dev\" \"npm run dev:server\"",
+    "build": "node scripts/generate-icon.js && vite build",
+    "tauri": "tauri",
     "start": "node server/index.cjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.72",
     "@anthropic-ai/sdk": "^0.36.3",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
     "express": "^4.21.2",
-    "multer": "^1.4.5-lts.1",
     "jszip": "^3.10.1",
+    "multer": "^1.4.5-lts.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -27,57 +27,12 @@
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.27",
     "concurrently": "^9.0.0",
-    "electron": "^34.0.0",
-    "electron-builder": "^25.0.0",
     "eslint": "^9",
     "postcss": "^8.5.8",
     "tailwindcss": "^3.4.1",
     "typescript": "^5",
     "vite": "^6.0.0",
     "@vitejs/plugin-react-swc": "^3.7.0",
-    "wait-on": "^8.0.0"
-  },
-  "build": {
-    "appId": "com.levelenter.a-eyes",
-    "productName": "A-Eyes",
-    "compression": "maximum",
-    "asar": true,
-    "copyright": "Copyright © 2025 Levelenter",
-    "files": [
-      "electron/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "dist",
-        "to": "app-dist"
-      },
-      {
-        "from": "server",
-        "to": "server"
-      }
-    ],
-    "mac": {
-      "target": [
-        { "target": "dmg", "arch": ["arm64", "x64"] }
-      ],
-      "icon": "build/icon.icns"
-    },
-    "win": {
-      "target": [
-        { "target": "nsis", "arch": ["x64"] }
-      ],
-      "icon": "build/icon.ico"
-    },
-    "linux": {
-      "target": [
-        { "target": "AppImage", "arch": ["x64"] }
-      ],
-      "icon": "build/icon.png"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true
-    }
+    "@tauri-apps/cli": "^2"
   }
 }
