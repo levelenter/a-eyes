@@ -2,8 +2,15 @@ import type { AppSettings } from "@/types";
 
 const SETTINGS_KEY = "a-eyes-settings";
 
-// .env.local の NEXT_PUBLIC_ANTHROPIC_API_KEY をビルド時に埋め込む
-const ENV_API_KEY = process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY ?? "";
+// .env.local の VITE_PUBLIC_ANTHROPIC_API_KEY をビルド時に埋め込む（Vite 用）
+// Vite 環境では process.env は存在しないため import.meta.env を参照する。
+// 未定義の場合は空文字列にフォールバックする。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const ENV_API_KEY =
+  (typeof import.meta !== "undefined" &&
+    (import.meta as any).env &&
+    ((import.meta as any).env.VITE_PUBLIC_ANTHROPIC_API_KEY as string | undefined)) ||
+  "";
 
 const defaultSettings: AppSettings = {
   accessibilityMode: null,

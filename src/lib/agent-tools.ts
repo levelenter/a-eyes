@@ -110,8 +110,9 @@ export async function executeTool(
 ): Promise<string> {
   switch (toolName) {
     case "list_files": {
-      const folder = context.workingFolder;
-      if (!folder) return "作業フォルダが設定されていません。";
+      // Web モードでは作業フォルダはサーバー側で固定されているため、
+      // context.workingFolder が null でも一覧取得を試みる。
+      const folder = context.workingFolder ?? "";
       const files = await listFiles(folder);
       if (files.length === 0) return "フォルダにファイルがありません。";
       return files
@@ -189,7 +190,12 @@ export async function executeTool(
 // ─────────────────────────────────────────────
 
 function resolvePath(filename: string, context: ToolContext): string {
-  // Already absolute or virtual path
+  // Web/Electron モードでは API がサーバー側の作業フォルダを固定で扱うため、
+  // 相対パス（ファイル名）のみを渡せばよい。
+  if (!isTauri) {
+    return filename;
+  }
+  // Tauri モードのみ、明示的なフォルダパスを使って解決する。
   if (filename.startsWith("/") || filename.startsWith("web://")) return filename;
   const folder = context.workingFolder ?? WEB_FOLDER;
   return folder.endsWith("/") ? `${folder}${filename}` : `${folder}/${filename}`;

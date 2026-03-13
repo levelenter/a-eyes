@@ -18,8 +18,9 @@ const MODEL = "claude-opus-4-6";
  * http:// = Tauri dev mode (next dev) OR web → API routes available
  */
 function canUseApiRoute(): boolean {
-  if (typeof window === "undefined") return false;
-  return window.location.protocol !== "file:";
+  // Next.js サーバーモード用の経路は廃止し、
+  // 常にブラウザSDK＋ファイルツール経由で動作させる。
+  return false;
 }
 
 /**

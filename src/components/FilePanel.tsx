@@ -35,8 +35,14 @@ export default function FilePanel({
 
   // Load files when folder changes
   useEffect(() => {
-    if (workingFolder) {
-      loadFiles(workingFolder);
+    // Web モードでは workingFolder に関係なくサーバー側の作業フォルダ一覧を取得する。
+    // Tauri モードのみ、ユーザーが選択したフォルダに応じて読み込む。
+    if (isTauri) {
+      if (workingFolder) {
+        loadFiles(workingFolder);
+      }
+    } else {
+      loadFiles(workingFolder ?? "");
     }
   }, [workingFolder]);
 
@@ -71,7 +77,9 @@ export default function FilePanel({
       const saved = await uploadFiles(fileList);
       onSpeak(`${saved.length}件のファイルをアップロードしました。`);
       // アップロード後にファイル一覧を更新
-      if (workingFolder) loadFiles(workingFolder);
+      if (isTauri ? !!workingFolder : true) {
+        loadFiles(workingFolder ?? "");
+      }
     } catch {
       onSpeak("アップロードに失敗しました。");
     }
@@ -95,7 +103,9 @@ export default function FilePanel({
     try {
       const saved = await uploadFiles(fileList);
       onSpeak(`${saved.length}件のファイルをドロップしました。`);
-      if (workingFolder) loadFiles(workingFolder);
+      if (isTauri ? !!workingFolder : true) {
+        loadFiles(workingFolder ?? "");
+      }
     } catch {
       onSpeak("アップロードに失敗しました。");
     }

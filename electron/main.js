@@ -16,7 +16,7 @@ function getUserFilesFolder() {
 }
 
 /** Poll http://127.0.0.1:PORT until it responds or times out. */
-function waitForServer(port, timeoutMs = 30000) {
+function waitForServer(port, timeoutMs = 120000) {
   return new Promise((resolve, reject) => {
     const deadline = Date.now() + timeoutMs;
     const tryOnce = () => {
@@ -37,24 +37,20 @@ function waitForServer(port, timeoutMs = 30000) {
   });
 }
 
-async function startNextServer() {
+async function startNodeServer() {
+  const workingFolder = getUserFilesFolder();
+
   if (isDev) {
-    // 開発時は Next の dev サーバーを npm script から起動する前提
-    await waitForServer(PORT, 30000);
+    // 開発時は npm script から server/index.cjs を起動している前提
+    await waitForServer(PORT, 120000);
     return;
   }
 
-  const serverPath = path.join(
-    process.resourcesPath,
-    "next-server",
-    "server.js"
-  );
+  const serverPath = path.join(process.resourcesPath, "server", "index.cjs");
 
   if (!fs.existsSync(serverPath)) {
-    throw new Error(`Next.js server not found at: ${serverPath}`);
+    throw new Error(`Server entry not found at: ${serverPath}`);
   }
-
-  const workingFolder = getUserFilesFolder();
 
   // utilityProcess.fork() is the Electron-recommended way to run a Node.js
   // script from a packaged app — unlike child_process.fork(), it works
@@ -72,11 +68,11 @@ async function startNextServer() {
   });
 
   nextServerProcess.on("exit", (code) => {
-    console.log("[Next.js] process exited with code", code);
+    console.log("[A-Eyes server] process exited with code", code);
   });
 
   // Wait until the HTTP server is accepting connections
-  await waitForServer(PORT, 30000);
+  await waitForServer(PORT, 120000);
 }
 
 async function createWindow() {
@@ -100,9 +96,9 @@ async function createWindow() {
     await mainWindow.loadFile(loadingPath);
   }
 
-  // バックグラウンドで Next.js サーバーを起動し、準備ができたら本体を読み込む
+  // バックグラウンドで Node.js サーバーを起動し、準備ができたら本体を読み込む
   try {
-    await startNextServer();
+    await startNodeServer();
     if (!mainWindow.isDestroyed()) {
       await mainWindow.loadURL(`http://localhost:${PORT}`);
     }

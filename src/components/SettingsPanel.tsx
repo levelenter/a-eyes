@@ -150,8 +150,8 @@ export default function SettingsPanel({ settings, onSettingsChange, onClose }: P
 
             {!effectiveKey && (
               <p className="text-yellow-500 text-xs mt-1">
-                .env.local の NEXT_PUBLIC_ANTHROPIC_API_KEY を設定するか、上のフィールドに入力してください。
-                設定後は <code className="bg-gray-800 px-1 rounded">npm run dev</code> を再起動してください。
+                .env.local の VITE_PUBLIC_ANTHROPIC_API_KEY を設定するか、上のフィールドに入力してください。
+                設定後は <code className="bg-gray-800 px-1 rounded">npm run dev:all</code> を再起動してください。
               </p>
             )}
           </div>
